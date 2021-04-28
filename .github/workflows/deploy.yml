@@ -21,7 +21,6 @@ jobs:
           node-version: '14.x'
       - run: npm ci
       - run: npm run test
-      - run: npm run test:e2e
 
       - name: Push docker image to ECR
         uses: kciter/aws-ecr-action@v2
