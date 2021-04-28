@@ -1,0 +1,58 @@
+name: Deployment
+
+on:
+  push:
+    branches: [master]
+
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set dynamic env variables
+        id: vars
+        run: echo "::set-output name=GIT_SHA::$(git rev-parse --short HEAD)"
+
+      - name: Run tests
+        uses: actions/setup-node@v1
+        with:
+          node-version: '14.x'
+      - run: npm ci
+      - run: npm run test
+      - run: npm run test:e2e
+
+      - name: Push docker image to ECR
+        uses: kciter/aws-ecr-action@v2
+        with:
+          access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          account_id: ${{ secrets.ACCOUNT_ID }}
+          repo: meet-up-back
+          region: us-east-1
+          create_repo: false
+          extra_build_args: --build-arg CI=true
+          tags: ${{ steps.vars.outputs.GIT_SHA }}
+
+      - name: Prepare Dockerrun.aws.json
+        uses: NicoG60/simple-template-renderer@v1
+        env:
+          TAG: ${{ steps.vars.outputs.GIT_SHA }}
+          ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
+        with:
+          input: Dockerrun.aws.json
+
+      - name: Create a deployment archive
+        run: zip -r deploy.zip Dockerrun.aws.json
+
+      - name: Deploy to ElasticBeanstalk
+        uses: einaregilsson/beanstalk-deploy@v16
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: meet-up-back
+          environment_name: production
+          region: us-east-1
+          version_label: git-${{ steps.vars.outputs.GIT_SHA }}
+          deployment_package: deploy.zip
